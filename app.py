@@ -1,146 +1,243 @@
 import streamlit as st
 import whisper
+import yt_dlp
 import tempfile
 import os
-import torch
+from pathlib import Path
+import subprocess
+import sys
 
-# Configure page
-st.set_page_config(
-    page_title="🎬 Fast Transcriber", 
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
-# Cache the model loading
-@st.cache_resource
-def load_model():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = whisper.load_model("base", device=device)
-    return model
-
-# Initialize model once
-if 'model' not in st.session_state:
-    with st.spinner("Loading AI model... (first time only)"):
-        st.session_state.model = load_model()
-
-st.title("⚡ Fast Video Transcriber")
-st.caption("AI-powered transcription with caching for speed")
-
-# Model selection
-model_size = st.selectbox(
-    "Model Quality",
-    ["tiny", "base", "small", "medium"],
-    index=1,
-    help="Tiny=fastest, Medium=best quality"
-)
-
-# File uploader
-video_file = st.file_uploader(
-    "Upload your file",
-    type=["mp4", "mkv", "wav", "mp3", "m4a", "flac", "webm"],
-    help="Supports video and audio files"
-)
-
-if video_file is not None:
-    # Show file info
-    file_size = len(video_file.read()) / (1024*1024)  # MB
-    video_file.seek(0)  # Reset file pointer
+# تثبيت المكتبات المطلوبة
+def install_requirements():
+    """تثبيت المكتبات المطلوبة"""
+    requirements = [
+        "openai-whisper",
+        "yt-dlp",
+        "ffmpeg-python"
+    ]
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("File Size", f"{file_size:.1f} MB")
-    with col2:
-        st.metric("Model", model_size.upper())
-    
-    if st.button("🚀 Start Transcription", type="primary"):
+    for req in requirements:
         try:
-            # Create temp file
-            file_ext = os.path.splitext(video_file.name)[1]
-            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
-                tmp.write(video_file.read())
-                tmp_path = tmp.name
-            
-            # Progress bar
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            status_text.text("Loading model...")
-            progress_bar.progress(25)
-            
-            # Load model if different size selected
-            if model_size != "base":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-                model = whisper.load_model(model_size, device=device)
-            else:
-                model = st.session_state.model
-            
-            status_text.text("Processing audio...")
-            progress_bar.progress(50)
-            
-            # Transcribe with options for speed
-            result = model.transcribe(
-                tmp_path,
-                fp16=torch.cuda.is_available(),  # Use fp16 on GPU for speed
-                verbose=False
-            )
-            
-            progress_bar.progress(100)
-            status_text.text("Complete!")
-            
-            # Results
-            st.success("✅ Transcription completed!")
-            
-            # Display transcript
-            transcript_text = result["text"].strip()
-            st.text_area(
-                "📝 Transcript",
-                transcript_text,
-                height=250,
-                help="Copy the text or download below"
-            )
-            
-            # Download button
-            st.download_button(
-                label="📥 Download Transcript",
-                data=transcript_text,
-                file_name=f"{os.path.splitext(video_file.name)[0]}_transcript.txt",
-                mime="text/plain"
-            )
-            
-            # Show segments if available
-            if "segments" in result and st.checkbox("Show timestamped segments"):
-                st.subheader("🕐 Timestamped Segments")
-                for i, segment in enumerate(result["segments"][:10]):  # Show first 10
-                    start = int(segment["start"])
-                    end = int(segment["end"])
-                    text = segment["text"].strip()
-                    st.write(f"**{start//60:02d}:{start%60:02d} - {end//60:02d}:{end%60:02d}**: {text}")
-            
-            # Cleanup
-            os.unlink(tmp_path)
-            
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-            if 'tmp_path' in locals():
-                try:
-                    os.unlink(tmp_path)
-                except:
-                    pass
-        finally:
-            if 'progress_bar' in locals():
-                progress_bar.empty()
-            if 'status_text' in locals():
-                status_text.empty()
+            subprocess.check_call([sys.executable, "-m", "pip", "install", req])
+        except subprocess.CalledProcessError:
+            st.error(f"فشل في تثبيت {req}")
 
-else:
-    st.info("👆 Upload a video or audio file to get started")
+# إعداد الصفحة
+st.set_page_config(
+    page_title="مُحوِّل الفيديو إلى نص",
+    page_icon="🎬",
+    layout="wide"
+)
+
+st.title("🎬 مُحوِّل الفيديو إلى نص")
+st.markdown("تطبيق لتحويل الفيديوهات إلى نص باستخدام الذكاء الاصطناعي")
+
+# إعداد Whisper
+@st.cache_resource
+def load_whisper_model(model_size):
+    """تحميل نموذج Whisper"""
+    try:
+        return whisper.load_model(model_size)
+    except Exception as e:
+        st.error(f"خطأ في تحميل النموذج: {str(e)}")
+        return None
+
+# دالة لتحميل الفيديو من رابط
+def download_video_from_url(url, output_path):
+    """تحميل الفيديو من رابط يوتيوب أو مواقع أخرى"""
+    try:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_path,
+            'noplaylist': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        
+        return True
+    except Exception as e:
+        st.error(f"خطأ في تحميل الفيديو: {str(e)}")
+        return False
+
+# دالة لاستخراج الصوت من الفيديو
+def extract_audio(video_path, audio_path):
+    """استخراج الصوت من الفيديو"""
+    try:
+        import ffmpeg
+        (
+            ffmpeg
+            .input(video_path)
+            .output(audio_path, acodec='pcm_s16le', ac=1, ar='16k')
+            .overwrite_output()
+            .run(quiet=True)
+        )
+        return True
+    except Exception as e:
+        st.error(f"خطأ في استخراج الصوت: {str(e)}")
+        return False
+
+# دالة لعمل الترانسكريبت
+def transcribe_audio(audio_path, model, language="auto"):
+    """تحويل الصوت إلى نص"""
+    try:
+        if language == "auto":
+            result = model.transcribe(audio_path)
+        else:
+            result = model.transcribe(audio_path, language=language)
+        
+        return result["text"]
+    except Exception as e:
+        st.error(f"خطأ في الترانسكريبت: {str(e)}")
+        return None
+
+# الواجهة الرئيسية
+def main():
+    # اختيار حجم النموذج
+    col1, col2 = st.columns(2)
     
-    # Tips section
-    with st.expander("💡 Speed Tips"):
-        st.write("""
-        - **Tiny model**: Fastest, good for quick drafts
-        - **Base model**: Good balance of speed and accuracy  
-        - **Small/Medium**: Better accuracy, slower processing
-        - **GPU**: Automatically used if available for 2-3x speed boost
-        - Files are processed locally and not stored
-        """)
+    with col1:
+        model_size = st.selectbox(
+            "اختر حجم النموذج:",
+            ["tiny", "base", "small", "medium", "large"],
+            index=2,
+            help="النماذج الأكبر أكثر دقة لكن أبطأ"
+        )
+    
+    with col2:
+        language = st.selectbox(
+            "اختر اللغة:",
+            ["auto", "ar", "en", "fr", "es", "de"],
+            help="auto للتحديد التلقائي"
+        )
+    
+    # تحميل النموذج
+    model = load_whisper_model(model_size)
+    
+    if model is None:
+        st.error("فشل في تحميل النموذج. تأكد من تثبيت المكتبات المطلوبة.")
+        return
+    
+    st.success(f"تم تحميل النموذج: {model_size}")
+    
+    # خيارات الإدخال
+    input_method = st.radio(
+        "اختر طريقة الإدخال:",
+        ["رابط فيديو", "رفع ملف"],
+        horizontal=True
+    )
+    
+    if input_method == "رابط فيديو":
+        url = st.text_input("أدخل رابط الفيديو (يوتيوب أو مواقع أخرى):")
+        
+        if st.button("ابدأ الترانسكريبت من الرابط"):
+            if url:
+                with st.spinner("جاري تحميل الفيديو..."):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        video_path = os.path.join(temp_dir, "video.%(ext)s")
+                        audio_path = os.path.join(temp_dir, "audio.wav")
+                        
+                        # تحميل الفيديو
+                        if download_video_from_url(url, video_path):
+                            # البحث عن الملف المُحمل
+                            downloaded_files = list(Path(temp_dir).glob("video.*"))
+                            if downloaded_files:
+                                actual_video_path = downloaded_files[0]
+                                
+                                # استخراج الصوت
+                                with st.spinner("جاري استخراج الصوت..."):
+                                    if extract_audio(str(actual_video_path), audio_path):
+                                        # عمل الترانسكريبت
+                                        with st.spinner("جاري تحويل الصوت إلى نص..."):
+                                            transcript = transcribe_audio(
+                                                audio_path, 
+                                                model, 
+                                                language if language != "auto" else None
+                                            )
+                                            
+                                            if transcript:
+                                                st.success("تم الترانسكريبت بنجاح!")
+                                                st.text_area("النص المُستخرج:", transcript, height=300)
+                                                
+                                                # إمكانية تحميل النص
+                                                st.download_button(
+                                                    label="تحميل النص",
+                                                    data=transcript,
+                                                    file_name="transcript.txt",
+                                                    mime="text/plain"
+                                                )
+            else:
+                st.warning("يرجى إدخال رابط الفيديو")
+    
+    else:  # رفع ملف
+        uploaded_file = st.file_uploader(
+            "اختر ملف فيديو أو صوت:",
+            type=['mp4', 'avi', 'mov', 'mp3', 'wav', 'm4a', 'flac']
+        )
+        
+        if uploaded_file is not None:
+            if st.button("ابدأ الترانسكريبت من الملف"):
+                with st.spinner("جاري معالجة الملف..."):
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        # حفظ الملف المرفوع
+                        uploaded_path = os.path.join(temp_dir, uploaded_file.name)
+                        with open(uploaded_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        
+                        # تحديد نوع الملف
+                        file_ext = Path(uploaded_file.name).suffix.lower()
+                        
+                        if file_ext in ['.mp3', '.wav', '.m4a', '.flac']:
+                            # ملف صوتي
+                            audio_path = uploaded_path
+                        else:
+                            # ملف فيديو - استخراج الصوت
+                            audio_path = os.path.join(temp_dir, "audio.wav")
+                            with st.spinner("جاري استخراج الصوت..."):
+                                if not extract_audio(uploaded_path, audio_path):
+                                    return
+                        
+                        # عمل الترانسكريبت
+                        with st.spinner("جاري تحويل الصوت إلى نص..."):
+                            transcript = transcribe_audio(
+                                audio_path, 
+                                model, 
+                                language if language != "auto" else None
+                            )
+                            
+                            if transcript:
+                                st.success("تم الترانسكريبت بنجاح!")
+                                st.text_area("النص المُستخرج:", transcript, height=300)
+                                
+                                # إمكانية تحميل النص
+                                st.download_button(
+                                    label="تحميل النص",
+                                    data=transcript,
+                                    file_name=f"transcript_{uploaded_file.name}.txt",
+                                    mime="text/plain"
+                                )
+
+# معلومات التثبيت
+with st.expander("معلومات التثبيت"):
+    st.markdown("""
+    ### المكتبات المطلوبة:
+    ```bash
+    pip install streamlit
+    pip install openai-whisper
+    pip install yt-dlp
+    pip install ffmpeg-python
+    ```
+    
+    ### تثبيت FFmpeg:
+    - **Windows**: تحميل من https://ffmpeg.org/download.html
+    - **macOS**: `brew install ffmpeg`
+    - **Linux**: `sudo apt install ffmpeg`
+    
+    ### تشغيل التطبيق:
+    ```bash
+    streamlit run app.py
+    ```
+    """)
+
+if __name__ == "__main__":
+    main()
