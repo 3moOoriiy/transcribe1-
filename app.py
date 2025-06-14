@@ -1,26 +1,84 @@
 import streamlit as st
-import whisper
-import yt_dlp
 import tempfile
 import os
 from pathlib import Path
 import subprocess
 import sys
 
-# تثبيت المكتبات المطلوبة
-def install_requirements():
-    """تثبيت المكتبات المطلوبة"""
-    requirements = [
-        "openai-whisper",
-        "yt-dlp",
-        "ffmpeg-python"
-    ]
+# دالة تثبيت المكتبات المطلوبة
+def install_package(package_name):
+    """تثبيت مكتبة واحدة"""
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package_name, "--quiet"])
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+# فحص وتثبيت المكتبات
+def check_and_install_requirements():
+    """فحص وتثبيت المكتبات المطلوبة"""
+    packages = {
+        "openai-whisper": "whisper",
+        "yt-dlp": "yt_dlp", 
+        "ffmpeg-python": "ffmpeg"
+    }
     
-    for req in requirements:
+    missing_packages = []
+    installed_modules = {}
+    
+    for pip_name, import_name in packages.items():
         try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", req])
-        except subprocess.CalledProcessError:
-            st.error(f"فشل في تثبيت {req}")
+            if import_name == "whisper":
+                import whisper
+                installed_modules["whisper"] = whisper
+            elif import_name == "yt_dlp":
+                import yt_dlp
+                installed_modules["yt_dlp"] = yt_dlp
+            elif import_name == "ffmpeg":
+                import ffmpeg
+                installed_modules["ffmpeg"] = ffmpeg
+        except ImportError:
+            missing_packages.append((pip_name, import_name))
+    
+    if missing_packages:
+        st.warning("جاري تثبيت المكتبات المطلوبة...")
+        progress_bar = st.progress(0)
+        
+        for i, (pip_name, import_name) in enumerate(missing_packages):
+            st.info(f"جاري تثبيت {pip_name}...")
+            if install_package(pip_name):
+                st.success(f"تم تثبيت {pip_name} بنجاح")
+                # إعادة استيراد المكتبة
+                if import_name == "whisper":
+                    import whisper
+                    installed_modules["whisper"] = whisper
+                elif import_name == "yt_dlp":
+                    import yt_dlp
+                    installed_modules["yt_dlp"] = yt_dlp
+                elif import_name == "ffmpeg":
+                    import ffmpeg
+                    installed_modules["ffmpeg"] = ffmpeg
+            else:
+                st.error(f"فشل في تثبيت {pip_name}")
+                return None
+            
+            progress_bar.progress((i + 1) / len(missing_packages))
+        
+        st.success("تم تثبيت جميع المكتبات بنجاح!")
+        st.rerun()
+    
+    return installed_modules
+
+# تحميل المكتبات
+modules = check_and_install_requirements()
+if modules is None:
+    st.error("فشل في تثبيت المكتبات المطلوبة")
+    st.stop()
+
+# استيراد المكتبات
+whisper = modules.get("whisper")
+yt_dlp = modules.get("yt_dlp") 
+ffmpeg = modules.get("ffmpeg")
 
 # إعداد الصفحة
 st.set_page_config(
@@ -64,15 +122,18 @@ def download_video_from_url(url, output_path):
 def extract_audio(video_path, audio_path):
     """استخراج الصوت من الفيديو"""
     try:
-        import ffmpeg
-        (
-            ffmpeg
-            .input(video_path)
-            .output(audio_path, acodec='pcm_s16le', ac=1, ar='16k')
-            .overwrite_output()
-            .run(quiet=True)
-        )
-        return True
+        if ffmpeg:
+            (
+                ffmpeg
+                .input(video_path)
+                .output(audio_path, acodec='pcm_s16le', ac=1, ar='16k')
+                .overwrite_output()
+                .run(quiet=True)
+            )
+            return True
+        else:
+            st.error("مكتبة ffmpeg غير متوفرة")
+            return False
     except Exception as e:
         st.error(f"خطأ في استخراج الصوت: {str(e)}")
         return False
@@ -93,6 +154,14 @@ def transcribe_audio(audio_path, model, language="auto"):
 
 # الواجهة الرئيسية
 def main():
+    # التحقق من توفر المكتبات
+    if not whisper:
+        st.error("مكتبة Whisper غير متوفرة. يرجى إعادة تحميل الصفحة.")
+        return
+    
+    if not yt_dlp:
+        st.error("مكتبة yt-dlp غير متوفرة. يرجى إعادة تحميل الصفحة.")
+        return
     # اختيار حجم النموذج
     col1, col2 = st.columns(2)
     
