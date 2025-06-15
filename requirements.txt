@@ -1,4 +1,4 @@
-# requirements.txt
 streamlit
 pytube
-openai
+whisper  # مكتبة تشغيل نموذج Whisper محلياً
+ffmpeg-python  # للتعامل مع تحويل الصيغ
