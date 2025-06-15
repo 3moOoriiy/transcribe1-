@@ -1,8 +1,8 @@
 import os
 import tempfile
 import streamlit as st
-from pytube import YouTube
 import whisper
+import yt_dlp
 from urllib.parse import urlparse, parse_qs
 
 st.set_page_config(page_title="Video Transcriber (Local Whisper)", layout="wide")
@@ -15,24 +15,39 @@ def sanitize_youtube_url(url: str) -> str:
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
-    # حالة watch?v=...
     if "v" in qs and qs["v"]:
         return f"https://www.youtube.com/watch?v={qs['v'][0]}"
-    # رابط Shorts
     if "/shorts/" in parsed.path:
         vid = parsed.path.split("/shorts/")[-1]
         return f"https://www.youtube.com/watch?v={vid}"
-    # رابط youtu.be
     if parsed.netloc in ("youtu.be", "www.youtu.be"):
         vid = parsed.path.lstrip("/")
         return f"https://www.youtube.com/watch?v={vid}"
-    # غير معروف، نعيد كما هو
     return url
+
+def download_audio(url: str, output_path: str):
+    """
+    يحمل أفضل مسار صوتي بصيغة webm/ m4a ثم يحفظه في output_path
+    """
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": output_path,
+        "quiet": True,
+        "no_warnings": True,
+        # إذا حابب تحوّل للصيغة mp3 مباشرة:
+        # "postprocessors": [{
+        #     "key": "FFmpegExtractAudio",
+        #     "preferredcodec": "mp3",
+        #     "preferredquality": "192",
+        # }],
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
 
 # اختيار حجم نموذج Whisper
 model_size = st.selectbox(
-    "اختر حجم نموذج Whisper", 
-    ["tiny", "base", "small", "medium", "large"], 
+    "اختر حجم نموذج Whisper",
+    ["tiny", "base", "small", "medium", "large"],
     index=2
 )
 
@@ -42,18 +57,14 @@ if st.button("Transcribe"):
     if not video_url.strip():
         st.warning("الرجاء إدخال رابط فيديو صالح.")
     else:
-        # تنقية الرابط
         clean_url = sanitize_youtube_url(video_url.strip())
-        # لعرض الرابط المنقّى للتأكد
         st.write("🔗 Using URL:", clean_url)
 
         try:
-            # تحميل الصوت
-            with st.spinner("⏳ Downloading & extracting audio…"):
-                yt = YouTube(clean_url)
-                audio_stream = yt.streams.filter(only_audio=True).first()
-                tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-                audio_stream.download(filename=tmp.name)
+            # تنزيل الصوت
+            with st.spinner("⏳ Downloading audio with yt-dlp…"):
+                tmp = tempfile.NamedTemporaryFile(suffix=".webm", delete=False)
+                download_audio(clean_url, tmp.name)
 
             # تحميل نموذج Whisper
             with st.spinner(f"🤖 Loading Whisper model ({model_size})…"):
@@ -69,4 +80,4 @@ if st.button("Transcribe"):
             st.text_area("", transcript, height=300)
 
         except Exception as e:
-            st.error(f"حدث خطأ: {e}")
+            st.error(f"حدث خطأ أثناء تحميل أو ترانسكريبت الصوت: {e}")
