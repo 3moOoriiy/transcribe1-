@@ -15,10 +15,9 @@ def sanitize_youtube_url(url: str) -> str:
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
-    # الحالة العاديّة watch?v=...
+    # حالة watch?v=...
     if "v" in qs and qs["v"]:
-        vid = qs["v"][0]
-        return f"https://www.youtube.com/watch?v={vid}"
+        return f"https://www.youtube.com/watch?v={qs['v'][0]}"
     # رابط Shorts
     if "/shorts/" in parsed.path:
         vid = parsed.path.split("/shorts/")[-1]
@@ -31,7 +30,12 @@ def sanitize_youtube_url(url: str) -> str:
     return url
 
 # اختيار حجم نموذج Whisper
-model_size = st.selectbox("اختر حجم نموذج Whisper", ["tiny", "base", "small", "medium", "large"], index=2)
+model_size = st.selectbox(
+    "اختر حجم نموذج Whisper", 
+    ["tiny", "base", "small", "medium", "large"], 
+    index=2
+)
+
 video_url = st.text_input("رابط الفيديو (YouTube أو Shorts أو youtu.be)")
 
 if st.button("Transcribe"):
@@ -39,7 +43,10 @@ if st.button("Transcribe"):
         st.warning("الرجاء إدخال رابط فيديو صالح.")
     else:
         # تنقية الرابط
-        clean_url = sanitize_youtube_url(video_url)
+        clean_url = sanitize_youtube_url(video_url.strip())
+        # لعرض الرابط المنقّى للتأكد
+        st.write("🔗 Using URL:", clean_url)
+
         try:
             # تحميل الصوت
             with st.spinner("⏳ Downloading & extracting audio…"):
