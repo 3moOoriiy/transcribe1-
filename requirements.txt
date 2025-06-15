@@ -1,4 +1,4 @@
 streamlit
 pytube
-whisper  # مكتبة تشغيل نموذج Whisper محلياً
-ffmpeg-python  # للتعامل مع تحويل الصيغ
+whisper
+ffmpeg-python
