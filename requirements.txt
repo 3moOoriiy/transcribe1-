@@ -1,4 +1,4 @@
 streamlit
-pytube
 whisper
 ffmpeg-python
+yt-dlp
