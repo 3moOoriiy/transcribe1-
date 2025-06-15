@@ -41,21 +41,67 @@ def download_audio(url: str, output_path: str):
     """
     يحمل أفضل مسار صوتي ويحفظه في output_path
     """
+    # إزالة امتداد الملف من المسار للسماح لـ yt-dlp بتحديد الامتداد
+    output_template = output_path.rsplit('.', 1)[0] + '.%(ext)s'
+    
     ydl_opts = {
-        "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+        "quiet": False,  # تمكين الرسائل للتشخيص
+        "no_warnings": False,
+        "postprocessors": [{
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": "wav",  # استخدام wav للتوافق الأفضل مع Whisper
+            "preferredquality": "192",
+        }],
+        "prefer_ffmpeg": True,
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        try:
+            # الحصول على معلومات الفيديو أولاً
+            info = ydl.extract_info(url, download=False)
+            st.info(f"📹 عنوان الفيديو: {info.get('title', 'غير متوفر')}")
+            st.info(f"⏱️ المدة: {info.get('duration', 0)} ثانية")
+            
+            # تحميل الصوت
+            ydl.download([url])
+            
+            # البحث عن الملف المحمل
+            possible_extensions = ['.wav', '.webm', '.m4a', '.mp3', '.ogg']
+            base_path = output_path.rsplit('.', 1)[0]
+            
+            for ext in possible_extensions:
+                test_path = base_path + ext
+                if os.path.exists(test_path) and os.path.getsize(test_path) > 0:
+                    # إعادة تسمية الملف للمسار المطلوب
+                    if test_path != output_path:
+                        import shutil
+                        shutil.move(test_path, output_path)
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            st.error(f"خطأ في تحميل الصوت: {str(e)}")
+            # محاولة بخيارات مبسطة
+            return download_audio_simple(url, output_path)
+
+def download_audio_simple(url: str, output_path: str):
+    """
+    طريقة بديلة مبسطة لتحميل الصوت
+    """
+    ydl_opts = {
+        "format": "worst[ext=webm]/worst",  # استخدام أسوأ جودة للسرعة
         "outtmpl": output_path,
         "quiet": True,
-        "no_warnings": True,
-        "extractaudio": True,
-        "audioformat": "best",
     }
     
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
             ydl.download([url])
-            return True
-        except Exception as e:
-            st.error(f"خطأ في تحميل الصوت: {str(e)}")
+            return os.path.exists(output_path) and os.path.getsize(output_path) > 0
+        except:
             return False
 
 def validate_youtube_url(url: str) -> bool:
@@ -110,21 +156,39 @@ if st.button("🚀 Start Transcription", type="primary"):
         try:
             # تنزيل الصوت
             with st.spinner("⏳ جاري تحميل الصوت..."):
-                temp_audio = tempfile.NamedTemporaryFile(suffix=".webm", delete=False)
+                temp_audio = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 temp_audio.close()  # إغلاق الملف للسماح لـ yt-dlp بالكتابة فيه
                 
                 success = download_audio(clean_url, temp_audio.name)
                 
                 if not success:
                     st.error("❌ فشل في تحميل الصوت من الفيديو.")
-                    st.stop()
+                    st.info("💡 تجربة تحميل بديلة...")
+                    
+                    # محاولة ثانية بملف webm
+                    temp_audio2 = tempfile.NamedTemporaryFile(suffix=".webm", delete=False)
+                    temp_audio2.close()
+                    success = download_audio_simple(clean_url, temp_audio2.name)
+                    
+                    if success:
+                        temp_audio = temp_audio2
+                    else:
+                        st.error("❌ فشل في جميع محاولات التحميل.")
+                        st.info("🔧 تأكد من:")
+                        st.info("1. FFmpeg مثبت على النظام")
+                        st.info("2. الرابط صحيح ومتاح")
+                        st.info("3. الاتصال بالإنترنت مستقر")
+                        st.stop()
                 
                 # التحقق من وجود الملف
                 if not os.path.exists(temp_audio.name) or os.path.getsize(temp_audio.name) == 0:
                     st.error("❌ لم يتم تحميل الصوت بشكل صحيح.")
+                    st.info(f"📁 مسار الملف: {temp_audio.name}")
+                    st.info(f"📊 حجم الملف: {os.path.getsize(temp_audio.name) if os.path.exists(temp_audio.name) else 0} بايت")
                     st.stop()
                 
-                st.success("✅ تم تحميل الصوت بنجاح!")
+                file_size_mb = os.path.getsize(temp_audio.name) / (1024 * 1024)
+                st.success(f"✅ تم تحميل الصوت بنجاح! ({file_size_mb:.1f} MB)")
             
             # تحميل نموذج Whisper
             with st.spinner(f"🤖 جاري تحميل نموذج Whisper ({model_size})..."):
