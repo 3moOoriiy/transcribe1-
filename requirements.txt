@@ -1,6 +1,8 @@
 streamlit>=1.28.0
 SpeechRecognition>=3.10.0
 pydub>=0.25.1
-moviepy>=1.0.3
 requests>=2.31.0
 pyaudio>=0.2.11
+moviepy
+imageio-ffmpeg
+numpy
