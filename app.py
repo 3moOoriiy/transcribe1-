@@ -20,7 +20,6 @@ except ImportError as e:
     st.stop()
 
 try:
-    import moviepy
     from moviepy.editor import VideoFileClip
 except ImportError:
     st.error("مكتبة moviepy غير مثبتة")
