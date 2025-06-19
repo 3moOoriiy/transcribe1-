@@ -8,11 +8,6 @@ import threading
 from pathlib import Path
 import streamlit as st
 
-try:
-    import moviepy.editor as mp
-    st.success("✅ تم استيراد moviepy بنجاح!")
-except ImportError:
-    st.error("❌ لم يتم تثبيت مكتبة moviepy. تأكد من أن 'moviepy' موجودة في requirements.txt")
 # Try to import required libraries with error handling
 try:
     import speech_recognition as sr
